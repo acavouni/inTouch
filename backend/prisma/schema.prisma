@@ -1,0 +1,43 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id          String   @id @default(uuid())
+  name        String
+  email       String   @unique
+  company     String?
+  homeCity    String?
+  currentCity String?
+  latitude    Float?
+  longitude   Float?
+  lastUpdated DateTime @default(now())
+  createdAt   DateTime @default(now())
+
+  friends      Friendship[] @relation("UserFriends")
+  friendOf     Friendship[] @relation("FriendOf")
+
+  @@map("users")
+}
+
+model Friendship {
+  id         String   @id @default(uuid())
+  userId     String
+  friendId   String
+
+  user       User     @relation("UserFriends", fields: [userId], references: [id])
+  friend     User     @relation("FriendOf", fields: [friendId], references: [id])
+
+  @@unique([userId, friendId])  // prevents duplicates
+}
