@@ -1,6 +1,14 @@
-# Welcome to your Expo app 👋
+# inTouch Frontend
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+## Tech Stack
+
+- **React Native** (via Expo)
+- **Expo Router** (file-based routing)
+- **TypeScript**
+- **React 19.0.0**
+- **Metro bundler** (Expo's default)
+- **Clerk** (authentication)
+- Cross-platform: iOS, Android, and Web
 
 ## Get started
 

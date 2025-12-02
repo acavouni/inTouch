@@ -14,25 +14,30 @@ Build a modular, scalable mobile app that:
 
 ## Tech Stack
 
-### Backend
-- Node.js
-- Express
-- PostgreSQL
-- Prisma ORM
-- dotenv for environment config
+### Frontend
+- **React Native** (via Expo)
+- **Expo Router** (file-based routing)
+- **TypeScript**
+- **React 19.0.0**
+- **Metro bundler** (Expo's default)
+- **Clerk** (authentication)
+- Cross-platform: iOS, Android, and Web
 
-### Frontend (Planned)
-- React Native with Expo
-- TypeScript
-- React Navigation
-- React Native Paper (UI)
-- OpenAI API (for lightweight AI features)
+### Backend
+- **Node.js**
+- **Express.js** (REST API)
+- **Prisma ORM** (database toolkit)
+- **CORS** enabled
+- **dotenv** for environment config
+
+### Database
+- **Prisma** (check `schema.prisma` for database type)
 
 ### Development Tools
-- nodemon (backend live reload)
-- Cursor (AI development assist)
-- Windsurf (feature expansion assist)
-- Git (version control)
+- **nodemon** (backend live reload)
+- **Cursor** (AI development assist)
+- **Windsurf** (feature expansion assist)
+- **Git** (version control)
 
 ## Development Principles
 

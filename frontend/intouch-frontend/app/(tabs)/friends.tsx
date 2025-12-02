@@ -11,12 +11,16 @@ import {
   FlatList,
   Modal,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useAuth } from '@clerk/clerk-expo';
 import { apiService, User } from '@/services/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const USER_ID_KEY = 'user_id';
 
 export default function FriendsScreen() {
+  const insets = useSafeAreaInsets();
+  const { getToken } = useAuth();
   const [friends, setFriends] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -43,6 +47,8 @@ export default function FriendsScreen() {
       const userId = await AsyncStorage.getItem(USER_ID_KEY);
       
       if (userId) {
+        // Set up authenticated API service
+        apiService.setAuth(getToken);
         const friendsList = await apiService.getUserFriends(userId);
         setFriends(friendsList);
       }
@@ -64,6 +70,7 @@ export default function FriendsScreen() {
 
     try {
       setSearching(true);
+      apiService.setAuth(getToken);
       const results = await apiService.searchUsers(query);
       
       // Filter out current user and existing friends
@@ -91,6 +98,7 @@ export default function FriendsScreen() {
 
     try {
       setAddingFriend(friendId);
+      apiService.setAuth(getToken);
       await apiService.addFriend(currentUserId, friendId);
       Alert.alert('Success', 'Friend added successfully!');
       setShowAddModal(false);
@@ -122,6 +130,7 @@ export default function FriendsScreen() {
           onPress: async () => {
             try {
               setRemovingFriend(friendId);
+              apiService.setAuth(getToken);
               await apiService.removeFriend(currentUserId, friendId);
               Alert.alert('Success', 'Friend removed successfully!');
               loadFriends(); // Reload friends list
@@ -200,7 +209,7 @@ export default function FriendsScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: insets.top + 20 }]}>
         <Text style={styles.title}>Friends</Text>
         <TouchableOpacity
           style={styles.addFriendButton}
@@ -290,7 +299,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 20,
+    paddingHorizontal: 20,
     paddingBottom: 12,
   },
   title: {

@@ -9,12 +9,18 @@ import {
   Alert,
   ScrollView,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useAuth } from '@clerk/clerk-expo';
 import { apiService, User } from '@/services/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { createAuthedFetch } from '@/lib/api';
 
 const USER_ID_KEY = 'user_id';
+const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:5001';
 
 export default function ProfileScreen() {
+  const insets = useSafeAreaInsets();
+  const { getToken, user: clerkUser } = useAuth();
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -34,15 +40,49 @@ export default function ProfileScreen() {
   const loadUserProfile = async () => {
     try {
       setLoading(true);
+      
+      // First, ensure user is synced with backend
       const userId = await AsyncStorage.getItem(USER_ID_KEY);
       
+      if (!userId) {
+        // User not synced yet, trigger sync
+        const token = await getToken();
+        if (token) {
+          const authedFetch = createAuthedFetch(getToken);
+          const syncResponse = await authedFetch(`${API_BASE_URL}/api/sync-user`, {
+            method: 'POST',
+          });
+          
+          if (syncResponse.ok) {
+            const syncedUser = await syncResponse.json();
+            await AsyncStorage.setItem(USER_ID_KEY, syncedUser.id);
+            setUser(syncedUser);
+            populateForm(syncedUser);
+            setLoading(false);
+            return;
+          }
+        }
+      }
+      
+      // Load user from backend
       if (userId) {
+        // Set up authenticated API service
+        apiService.setAuth(getToken);
         const userData = await apiService.getUserById(userId);
         setUser(userData);
         populateForm(userData);
       } else {
-        // No user ID stored, show empty form for new user
-        setEditing(true);
+        // Fallback: use Clerk user data if available
+        if (clerkUser) {
+          const clerkEmail = clerkUser.emailAddresses[0]?.emailAddress || '';
+          const clerkName = clerkUser.firstName && clerkUser.lastName
+            ? `${clerkUser.firstName} ${clerkUser.lastName}`.trim()
+            : clerkUser.firstName || clerkUser.lastName || clerkUser.username || '';
+          
+          setName(clerkName);
+          setEmail(clerkEmail);
+          setEditing(true);
+        }
       }
     } catch (error) {
       console.error('Error loading profile:', error);
@@ -68,6 +108,9 @@ export default function ProfileScreen() {
 
     try {
       setSaving(true);
+      
+      // Ensure API service is authenticated
+      apiService.setAuth(getToken);
 
       if (user) {
         // Update existing user
@@ -83,21 +126,37 @@ export default function ProfileScreen() {
         setEditing(false);
         Alert.alert('Success', 'Profile updated successfully!');
       } else {
-        // Create new user
-        const newUser = await apiService.createUser({
-          name: name.trim(),
-          email: email.trim(),
-          company: company.trim() || undefined,
-          homeCity: homeCity.trim() || undefined,
-          currentCity: currentCity.trim() || undefined,
-        });
-
-        // Store user ID for future requests
-        await AsyncStorage.setItem(USER_ID_KEY, newUser.id);
-        
-        setUser(newUser);
-        setEditing(false);
-        Alert.alert('Success', 'Profile created successfully!');
+        // This shouldn't happen if sync worked, but handle it anyway
+        // Try to sync user first
+        const token = await getToken();
+        if (token) {
+          const authedFetch = createAuthedFetch(getToken);
+          const syncResponse = await authedFetch(`${API_BASE_URL}/api/sync-user`, {
+            method: 'POST',
+          });
+          
+          if (syncResponse.ok) {
+            const syncedUser = await syncResponse.json();
+            await AsyncStorage.setItem(USER_ID_KEY, syncedUser.id);
+            
+            // Now update the synced user
+            const updatedUser = await apiService.updateUser(syncedUser.id, {
+              name: name.trim(),
+              email: email.trim(),
+              company: company.trim() || undefined,
+              homeCity: homeCity.trim() || undefined,
+              currentCity: currentCity.trim() || undefined,
+            });
+            
+            setUser(updatedUser);
+            setEditing(false);
+            Alert.alert('Success', 'Profile updated successfully!');
+          } else {
+            throw new Error('Failed to sync user');
+          }
+        } else {
+          throw new Error('Not authenticated');
+        }
       }
     } catch (error: any) {
       console.error('Error saving profile:', error);
@@ -118,7 +177,7 @@ export default function ProfileScreen() {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: insets.top + 20 }]}>
         <Text style={styles.title}>Profile</Text>
         {user && !editing && (
           <TouchableOpacity onPress={() => setEditing(true)}>
@@ -225,6 +284,7 @@ const styles = StyleSheet.create({
   },
   content: {
     padding: 20,
+    paddingTop: 0,
   },
   centerContainer: {
     flex: 1,
@@ -241,6 +301,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 24,
+    paddingHorizontal: 0,
   },
   title: {
     fontSize: 32,

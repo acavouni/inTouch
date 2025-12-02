@@ -1,4 +1,6 @@
-const API_BASE_URL = 'http://localhost:5001'; // Change to your backend URL if different
+import { createAuthedFetch } from '@/lib/api';
+
+const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:5001';
 
 export interface User {
   id: string;
@@ -16,9 +18,18 @@ export interface User {
 
 class ApiService {
   private baseUrl: string;
+  private authedFetch: ((url: string, options?: RequestInit) => Promise<Response>) | null = null;
 
   constructor(baseUrl: string = API_BASE_URL) {
     this.baseUrl = baseUrl;
+  }
+
+  /**
+   * Set the authenticated fetch function
+   * Call this in components: apiService.setAuth(getToken);
+   */
+  setAuth(getToken: () => Promise<string | null>) {
+    this.authedFetch = createAuthedFetch(getToken);
   }
 
   private async request<T>(
@@ -27,13 +38,16 @@ class ApiService {
   ): Promise<T> {
     const url = `${this.baseUrl}${endpoint}`;
     
-    const response = await fetch(url, {
-      ...options,
-      headers: {
-        'Content-Type': 'application/json',
-        ...options.headers,
-      },
-    });
+    // Use authed fetch if available, otherwise use regular fetch
+    const response = this.authedFetch
+      ? await this.authedFetch(endpoint, options)
+      : await fetch(url, {
+          ...options,
+          headers: {
+            'Content-Type': 'application/json',
+            ...options.headers,
+          },
+        });
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({ error: 'Request failed' }));

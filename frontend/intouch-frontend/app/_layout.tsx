@@ -3,9 +3,33 @@ import { useFonts } from 'expo-font';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import 'react-native-reanimated';
+import { ClerkProvider } from '@clerk/clerk-expo';
+import * as SecureStore from 'expo-secure-store';
 
 import { useColorScheme } from '@/hooks/useColorScheme';
-import { AuthProvider } from '@/hooks/useAuth';
+
+const tokenCache = {
+  async getToken(key: string) {
+    try {
+      return await SecureStore.getItemAsync(key);
+    } catch (err) {
+      return null;
+    }
+  },
+  async saveToken(key: string, value: string) {
+    try {
+      return await SecureStore.setItemAsync(key, value);
+    } catch (err) {
+      return;
+    }
+  },
+};
+
+const publishableKey = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY || '';
+
+if (!publishableKey) {
+  throw new Error('Missing EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY environment variable');
+}
 
 export default function RootLayout() {
   const colorScheme = useColorScheme();
@@ -19,15 +43,17 @@ export default function RootLayout() {
   }
 
   return (
-    <AuthProvider>
+    <ClerkProvider publishableKey={publishableKey} tokenCache={tokenCache}>
       <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
         <Stack screenOptions={{ headerShown: false }}>
-          <Stack.Screen name="auth/login" />
+          <Stack.Screen name="index" />
+          <Stack.Screen name="(auth)" />
+          <Stack.Screen name="oauth-callback" />
           <Stack.Screen name="(tabs)" />
           <Stack.Screen name="+not-found" />
         </Stack>
         <StatusBar style="auto" />
       </ThemeProvider>
-    </AuthProvider>
+    </ClerkProvider>
   );
 }
