@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -7,20 +7,23 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Alert,
+  FlatList,
   ScrollView,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useAuth } from '@clerk/clerk-expo';
+import { useAuth, useUser } from '@clerk/clerk-expo';
 import { apiService, User } from '@/services/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createAuthedFetch } from '@/lib/api';
+import { GooglePlacesAutocomplete } from 'react-native-google-places-autocomplete';
 
 const USER_ID_KEY = 'user_id';
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:5001';
 
 export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
-  const { getToken, user: clerkUser } = useAuth();
+  const { getToken } = useAuth();
+  const { user: clerkUser } = useUser();
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -32,10 +35,32 @@ export default function ProfileScreen() {
   const [company, setCompany] = useState('');
   const [homeCity, setHomeCity] = useState('');
   const [currentCity, setCurrentCity] = useState('');
+  const [latitude, setLatitude] = useState<number | null>(null);
+  const [longitude, setLongitude] = useState<number | null>(null);
+
+  // Refs for Google Places Autocomplete
+  const homeCityRef = useRef<any>(null);
+  const currentCityRef = useRef<any>(null);
 
   useEffect(() => {
     loadUserProfile();
   }, []);
+
+  // Pre-fill Google Places Autocomplete when editing starts
+  useEffect(() => {
+    if (editing) {
+      // Small delay to ensure refs are mounted
+      setTimeout(() => {
+        if (homeCity && homeCityRef.current) {
+          homeCityRef.current.setAddressText(homeCity);
+        }
+        if (currentCity && currentCityRef.current) {
+          currentCityRef.current.setAddressText(currentCity);
+        }
+      }, 100);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editing]);
 
   const loadUserProfile = async () => {
     try {
@@ -98,6 +123,8 @@ export default function ProfileScreen() {
     setCompany(userData.company || '');
     setHomeCity(userData.homeCity || '');
     setCurrentCity(userData.currentCity || '');
+    setLatitude(userData.latitude ?? null);
+    setLongitude(userData.longitude ?? null);
   };
 
   const handleSave = async () => {
@@ -120,6 +147,8 @@ export default function ProfileScreen() {
           company: company.trim() || undefined,
           homeCity: homeCity.trim() || undefined,
           currentCity: currentCity.trim() || undefined,
+          latitude: latitude ?? undefined,
+          longitude: longitude ?? undefined,
         });
         
         setUser(updatedUser);
@@ -146,6 +175,8 @@ export default function ProfileScreen() {
               company: company.trim() || undefined,
               homeCity: homeCity.trim() || undefined,
               currentCity: currentCity.trim() || undefined,
+              latitude: latitude ?? undefined,
+              longitude: longitude ?? undefined,
             });
             
             setUser(updatedUser);
@@ -175,8 +206,8 @@ export default function ProfileScreen() {
     );
   }
 
-  return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+  const headerContent = (
+    <>
       <View style={[styles.header, { paddingTop: insets.top + 20 }]}>
         <Text style={styles.title}>Profile</Text>
         {user && !editing && (
@@ -224,24 +255,148 @@ export default function ProfileScreen() {
 
         <View style={styles.field}>
           <Text style={styles.label}>Home City</Text>
-          <TextInput
-            style={styles.input}
-            value={homeCity}
-            onChangeText={setHomeCity}
-            placeholder="Where are you based?"
-            editable={editing}
-          />
+          {editing ? (
+            <GooglePlacesAutocomplete
+              ref={homeCityRef}
+              key="homeCity"
+              placeholder="Where are you based?"
+              onPress={(data, details = null) => {
+                if (details) {
+                  const cityName = data.description;
+                  const lat = details.geometry.location.lat;
+                  const lng = details.geometry.location.lng;
+                  
+                  // Update state
+                  setHomeCity(cityName);
+                  setLatitude(lat);
+                  setLongitude(lng);
+                  
+                  // Keep the text in the input
+                  if (homeCityRef.current) {
+                    homeCityRef.current.setAddressText(cityName);
+                  }
+                }
+              }}
+              query={{
+                key: process.env.EXPO_PUBLIC_GOOGLE_PLACES_API_KEY,
+                language: 'en',
+                types: '(cities)',
+              }}
+              fetchDetails={true}
+              enablePoweredByContainer={false}
+              textInputProps={{
+                placeholderTextColor: '#999',
+              }}
+              styles={{
+                textInput: {
+                  borderWidth: 1,
+                  borderColor: '#ddd',
+                  borderRadius: 8,
+                  padding: 12,
+                  fontSize: 16,
+                  backgroundColor: '#f9f9f9',
+                  height: 44,
+                },
+                listView: {
+                  borderWidth: 1,
+                  borderColor: '#ddd',
+                  borderRadius: 8,
+                  backgroundColor: '#fff',
+                  marginTop: 4,
+                },
+                row: {
+                  padding: 13,
+                  height: 44,
+                  flexDirection: 'row',
+                },
+                separator: {
+                  height: 0.5,
+                  backgroundColor: '#ddd',
+                },
+              }}
+            />
+          ) : (
+            <TextInput
+              style={styles.input}
+              value={homeCity}
+              editable={false}
+              placeholder="Where are you based?"
+            />
+          )}
         </View>
 
         <View style={styles.field}>
           <Text style={styles.label}>Current City</Text>
-          <TextInput
-            style={styles.input}
-            value={currentCity}
-            onChangeText={setCurrentCity}
-            placeholder="Where are you now?"
-            editable={editing}
-          />
+          {editing ? (
+            <GooglePlacesAutocomplete
+              ref={currentCityRef}
+              key="currentCity"
+              placeholder="Where are you now?"
+              onPress={(data, details = null) => {
+                if (details) {
+                  const cityName = data.description;
+                  const lat = details.geometry.location.lat;
+                  const lng = details.geometry.location.lng;
+                  
+                  // Update state
+                  setCurrentCity(cityName);
+                  // Note: We're using the same latitude/longitude for simplicity
+                  // In a production app, you might want separate coords for current location
+                  setLatitude(lat);
+                  setLongitude(lng);
+                  
+                  // Keep the text in the input
+                  if (currentCityRef.current) {
+                    currentCityRef.current.setAddressText(cityName);
+                  }
+                }
+              }}
+              query={{
+                key: process.env.EXPO_PUBLIC_GOOGLE_PLACES_API_KEY,
+                language: 'en',
+                types: '(cities)',
+              }}
+              fetchDetails={true}
+              enablePoweredByContainer={false}
+              textInputProps={{
+                placeholderTextColor: '#999',
+              }}
+              styles={{
+                textInput: {
+                  borderWidth: 1,
+                  borderColor: '#ddd',
+                  borderRadius: 8,
+                  padding: 12,
+                  fontSize: 16,
+                  backgroundColor: '#f9f9f9',
+                  height: 44,
+                },
+                listView: {
+                  borderWidth: 1,
+                  borderColor: '#ddd',
+                  borderRadius: 8,
+                  backgroundColor: '#fff',
+                  marginTop: 4,
+                },
+                row: {
+                  padding: 13,
+                  height: 44,
+                  flexDirection: 'row',
+                },
+                separator: {
+                  height: 0.5,
+                  backgroundColor: '#ddd',
+                },
+              }}
+            />
+          ) : (
+            <TextInput
+              style={styles.input}
+              value={currentCity}
+              editable={false}
+              placeholder="Where are you now?"
+            />
+          )}
         </View>
 
         {editing && (
@@ -273,7 +428,18 @@ export default function ProfileScreen() {
           </View>
         )}
       </View>
-    </ScrollView>
+    </>
+  );
+
+  return (
+    <FlatList
+      style={styles.container}
+      contentContainerStyle={styles.content}
+      data={[]}
+      renderItem={null}
+      ListHeaderComponent={headerContent}
+      keyboardShouldPersistTaps="handled"
+    />
   );
 }
 

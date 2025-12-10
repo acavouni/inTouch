@@ -89,6 +89,8 @@ class ApiService {
     company?: string;
     homeCity?: string;
     currentCity?: string;
+    latitude?: number;
+    longitude?: number;
   }): Promise<User> {
     return this.request<User>(`/users/${id}`, {
       method: 'PUT',

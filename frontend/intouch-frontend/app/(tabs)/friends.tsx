@@ -5,277 +5,295 @@ import {
   TextInput,
   StyleSheet,
   TouchableOpacity,
+  FlatList,
   ActivityIndicator,
   Alert,
-  ScrollView,
-  FlatList,
-  Modal,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '@clerk/clerk-expo';
 import { apiService, User } from '@/services/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import MapView, { Marker } from 'react-native-maps';
 
 const USER_ID_KEY = 'user_id';
+
+// Helper function to get initials from a full name
+const getInitials = (name: string): string => {
+  const nameParts = name.trim().split(' ');
+  if (nameParts.length === 1) {
+    return nameParts[0].charAt(0).toUpperCase();
+  }
+  const firstInitial = nameParts[0].charAt(0).toUpperCase();
+  const lastInitial = nameParts[nameParts.length - 1].charAt(0).toUpperCase();
+  return `${firstInitial}${lastInitial}`;
+};
 
 export default function FriendsScreen() {
   const insets = useSafeAreaInsets();
   const { getToken } = useAuth();
+  const [viewMode, setViewMode] = useState<'list' | 'map'>('list');
+  const [searchQuery, setSearchQuery] = useState('');
   const [friends, setFriends] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<User[]>([]);
-  const [searching, setSearching] = useState(false);
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [addingFriend, setAddingFriend] = useState<string | null>(null);
-  const [removingFriend, setRemovingFriend] = useState<string | null>(null);
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    loadUserId();
     loadFriends();
   }, []);
-
-  const loadUserId = async () => {
-    const userId = await AsyncStorage.getItem(USER_ID_KEY);
-    setCurrentUserId(userId);
-  };
 
   const loadFriends = async () => {
     try {
       setLoading(true);
+      setError(null);
+      
       const userId = await AsyncStorage.getItem(USER_ID_KEY);
       
-      if (userId) {
-        // Set up authenticated API service
-        apiService.setAuth(getToken);
-        const friendsList = await apiService.getUserFriends(userId);
-        setFriends(friendsList);
+      if (!userId) {
+        setError('User not found. Please log in again.');
+        setLoading(false);
+        return;
       }
-    } catch (error) {
-      console.error('Error loading friends:', error);
+
+      // Set up authenticated API service
+      apiService.setAuth(getToken);
+      const friendsList = await apiService.getUserFriends(userId);
+      setFriends(friendsList);
+    } catch (err: any) {
+      console.error('Error loading friends:', err);
+      setError(err.message || 'Failed to load friends. Please try again.');
       Alert.alert('Error', 'Failed to load friends. Please try again.');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleSearch = async (query: string) => {
-    setSearchQuery(query);
+  // Filter friends based on search query
+  const filteredFriends = friends.filter((friend) => {
+    if (!searchQuery.trim()) return true;
     
-    if (query.trim().length < 2) {
-      setSearchResults([]);
-      return;
+    const query = searchQuery.toLowerCase();
+    const name = friend.name.toLowerCase();
+    const homeCity = friend.homeCity?.toLowerCase() || '';
+    const currentCity = friend.currentCity?.toLowerCase() || '';
+    
+    return name.includes(query) || homeCity.includes(query) || currentCity.includes(query);
+  });
+
+  // Calculate map region based on filtered friends with coordinates
+  const getMapRegion = () => {
+    // Filter friends that have valid coordinates
+    const friendsWithCoords = filteredFriends.filter(
+      (f) => f.latitude != null && f.longitude != null
+    );
+
+    if (friendsWithCoords.length === 0) {
+      // Default to US center if no friends have coordinates
+      return {
+        latitude: 37.7749,
+        longitude: -95.4194,
+        latitudeDelta: 40,
+        longitudeDelta: 40,
+      };
     }
 
-    try {
-      setSearching(true);
-      apiService.setAuth(getToken);
-      const results = await apiService.searchUsers(query);
-      
-      // Filter out current user and existing friends
-      const userId = await AsyncStorage.getItem(USER_ID_KEY);
-      const friendIds = new Set(friends.map(f => f.id));
-      
-      const filteredResults = results.filter(
-        user => user.id !== userId && !friendIds.has(user.id)
-      );
-      
-      setSearchResults(filteredResults);
-    } catch (error) {
-      console.error('Error searching users:', error);
-      Alert.alert('Error', 'Failed to search users. Please try again.');
-    } finally {
-      setSearching(false);
-    }
+    const lats = friendsWithCoords.map((f) => f.latitude!);
+    const longs = friendsWithCoords.map((f) => f.longitude!);
+
+    const minLat = Math.min(...lats);
+    const maxLat = Math.max(...lats);
+    const minLong = Math.min(...longs);
+    const maxLong = Math.max(...longs);
+
+    const latitude = (minLat + maxLat) / 2;
+    const longitude = (minLong + maxLong) / 2;
+    const latitudeDelta = (maxLat - minLat) * 1.5 || 0.1;
+    const longitudeDelta = (maxLong - minLong) * 1.5 || 0.1;
+
+    return {
+      latitude,
+      longitude,
+      latitudeDelta: Math.max(latitudeDelta, 0.1),
+      longitudeDelta: Math.max(longitudeDelta, 0.1),
+    };
   };
 
-  const handleAddFriend = async (friendId: string) => {
-    if (!currentUserId) {
-      Alert.alert('Error', 'User ID not found. Please log in again.');
-      return;
-    }
-
-    try {
-      setAddingFriend(friendId);
-      apiService.setAuth(getToken);
-      await apiService.addFriend(currentUserId, friendId);
-      Alert.alert('Success', 'Friend added successfully!');
-      setShowAddModal(false);
-      setSearchQuery('');
-      setSearchResults([]);
-      loadFriends(); // Reload friends list
-    } catch (error: any) {
-      console.error('Error adding friend:', error);
-      Alert.alert('Error', error.message || 'Failed to add friend. Please try again.');
-    } finally {
-      setAddingFriend(null);
-    }
-  };
-
-  const handleRemoveFriend = async (friendId: string) => {
-    if (!currentUserId) {
-      Alert.alert('Error', 'User ID not found. Please log in again.');
-      return;
-    }
-
-    Alert.alert(
-      'Remove Friend',
-      'Are you sure you want to remove this friend?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Remove',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              setRemovingFriend(friendId);
-              apiService.setAuth(getToken);
-              await apiService.removeFriend(currentUserId, friendId);
-              Alert.alert('Success', 'Friend removed successfully!');
-              loadFriends(); // Reload friends list
-            } catch (error: any) {
-              console.error('Error removing friend:', error);
-              Alert.alert('Error', error.message || 'Failed to remove friend. Please try again.');
-            } finally {
-              setRemovingFriend(null);
-            }
-          },
-        },
-      ]
+  const renderFriendCard = ({ item }: { item: User }) => {
+    const city = item.currentCity || item.homeCity;
+    
+    return (
+      <View style={styles.friendCard}>
+        <View style={styles.friendAvatar}>
+          <Text style={styles.friendAvatarText}>
+            {getInitials(item.name)}
+          </Text>
+        </View>
+        <View style={styles.friendInfo}>
+          <Text style={styles.friendName}>{item.name}</Text>
+          {city && <Text style={styles.friendCity}>📍 {city}</Text>}
+          {item.currentCity && item.currentCity !== item.homeCity && item.homeCity && (
+            <Text style={styles.friendHomeCity}>🏠 From {item.homeCity}</Text>
+          )}
+        </View>
+      </View>
     );
   };
 
-  const renderFriendItem = ({ item }: { item: User }) => (
-    <View style={styles.friendItem}>
-      <View style={styles.friendInfo}>
-        <Text style={styles.friendName}>{item.name}</Text>
-        <Text style={styles.friendEmail}>{item.email}</Text>
-        {item.homeCity && (
-          <Text style={styles.friendLocation}>📍 {item.homeCity}</Text>
-        )}
-        {item.currentCity && item.currentCity !== item.homeCity && (
-          <Text style={styles.friendLocation}>✈️ Currently in {item.currentCity}</Text>
-        )}
-        {item.company && (
-          <Text style={styles.friendCompany}>💼 {item.company}</Text>
-        )}
-      </View>
-      <TouchableOpacity
-        style={styles.removeButton}
-        onPress={() => handleRemoveFriend(item.id)}
-        disabled={removingFriend === item.id}
-      >
-        {removingFriend === item.id ? (
-          <ActivityIndicator size="small" color="#fff" />
-        ) : (
-          <Text style={styles.removeButtonText}>Remove</Text>
-        )}
-      </TouchableOpacity>
-    </View>
-  );
+  const renderCustomMarker = (friend: User) => {
+    // Only render marker if friend has coordinates
+    if (friend.latitude == null || friend.longitude == null) {
+      return null;
+    }
 
-  const renderSearchResult = (user: User) => (
-    <View key={user.id} style={styles.searchResultItem}>
-      <View style={styles.searchResultInfo}>
-        <Text style={styles.searchResultName}>{user.name}</Text>
-        <Text style={styles.searchResultEmail}>{user.email}</Text>
-        {user.homeCity && (
-          <Text style={styles.searchResultLocation}>📍 {user.homeCity}</Text>
-        )}
-      </View>
-      <TouchableOpacity
-        style={styles.addButton}
-        onPress={() => handleAddFriend(user.id)}
-        disabled={addingFriend === user.id}
+    const city = friend.currentCity || friend.homeCity || 'Unknown';
+
+    return (
+      <Marker
+        key={friend.id}
+        coordinate={{
+          latitude: friend.latitude,
+          longitude: friend.longitude,
+        }}
+        title={friend.name}
+        description={city}
       >
-        {addingFriend === user.id ? (
-          <ActivityIndicator size="small" color="#fff" />
-        ) : (
-          <Text style={styles.addButtonText}>Add</Text>
-        )}
-      </TouchableOpacity>
-    </View>
-  );
+        <View style={styles.customMarker}>
+          <Text style={styles.markerText}>
+            {getInitials(friend.name)}
+          </Text>
+        </View>
+      </Marker>
+    );
+  };
 
   if (loading) {
     return (
       <View style={styles.centerContainer}>
-        <ActivityIndicator size="large" />
+        <ActivityIndicator size="large" color="#007AFF" />
         <Text style={styles.loadingText}>Loading friends...</Text>
       </View>
     );
   }
 
+  if (error && friends.length === 0) {
+    return (
+      <View style={styles.centerContainer}>
+        <Text style={styles.errorText}>⚠️ {error}</Text>
+        <TouchableOpacity style={styles.retryButton} onPress={loadFriends}>
+          <Text style={styles.retryButtonText}>Retry</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  // Count friends with coordinates for map view
+  const friendsWithCoords = filteredFriends.filter(
+    (f) => f.latitude != null && f.longitude != null
+  );
+
   return (
     <View style={styles.container}>
+      {/* Header */}
       <View style={[styles.header, { paddingTop: insets.top + 20 }]}>
         <Text style={styles.title}>Friends</Text>
-        <TouchableOpacity
-          style={styles.addFriendButton}
-          onPress={() => setShowAddModal(true)}
-        >
-          <Text style={styles.addFriendButtonText}>+ Add Friend</Text>
+        <TouchableOpacity onPress={loadFriends} disabled={loading}>
+          <Text style={styles.refreshButton}>↻</Text>
         </TouchableOpacity>
       </View>
 
-      {friends.length === 0 ? (
-        <View style={styles.emptyContainer}>
-          <Text style={styles.emptyText}>No friends yet</Text>
-          <Text style={styles.emptySubtext}>Tap "+ Add Friend" to get started</Text>
-        </View>
-      ) : (
+      {/* Search Bar */}
+      <View style={styles.searchContainer}>
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Search friends by name or city..."
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+          autoCapitalize="none"
+          autoCorrect={false}
+        />
+      </View>
+
+      {/* View Toggle */}
+      <View style={styles.toggleContainer}>
+        <TouchableOpacity
+          style={[
+            styles.toggleButton,
+            viewMode === 'list' && styles.toggleButtonActive,
+          ]}
+          onPress={() => setViewMode('list')}
+        >
+          <Text
+            style={[
+              styles.toggleButtonText,
+              viewMode === 'list' && styles.toggleButtonTextActive,
+            ]}
+          >
+            List
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[
+            styles.toggleButton,
+            viewMode === 'map' && styles.toggleButtonActive,
+          ]}
+          onPress={() => setViewMode('map')}
+        >
+          <Text
+            style={[
+              styles.toggleButtonText,
+              viewMode === 'map' && styles.toggleButtonTextActive,
+            ]}
+          >
+            Map
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Content */}
+      {viewMode === 'list' ? (
         <FlatList
-          data={friends}
-          renderItem={renderFriendItem}
+          data={filteredFriends}
+          renderItem={renderFriendCard}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContent}
-          refreshing={loading}
-          onRefresh={loadFriends}
-        />
-      )}
-
-      {/* Add Friend Modal */}
-      <Modal
-        visible={showAddModal}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setShowAddModal(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Add Friend</Text>
-              <TouchableOpacity onPress={() => setShowAddModal(false)}>
-                <Text style={styles.modalCloseButton}>✕</Text>
-              </TouchableOpacity>
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+              <Text style={styles.emptyText}>No friends found</Text>
+              <Text style={styles.emptySubtext}>
+                {searchQuery ? 'Try a different search term' : 'Add some friends to get started'}
+              </Text>
             </View>
-
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Search by name or email..."
-              value={searchQuery}
-              onChangeText={handleSearch}
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
-
-            {searching && (
-              <View style={styles.searchingContainer}>
-                <ActivityIndicator size="small" />
-                <Text style={styles.searchingText}>Searching...</Text>
-              </View>
-            )}
-
-            <ScrollView style={styles.searchResultsContainer}>
-              {searchResults.length === 0 && searchQuery.length >= 2 && !searching && (
-                <Text style={styles.noResultsText}>No users found</Text>
+          }
+        />
+      ) : (
+        <View style={{ flex: 1 }}>
+          {friendsWithCoords.length === 0 ? (
+            <View style={styles.centerContainer}>
+              <Text style={styles.emptyText}>No location data available</Text>
+              <Text style={styles.emptySubtext}>
+                Your friends need to add their locations to appear on the map
+              </Text>
+            </View>
+          ) : (
+            <>
+              <MapView
+                style={styles.map}
+                region={getMapRegion()}
+                showsUserLocation={false}
+                showsMyLocationButton={false}
+              >
+                {filteredFriends.map(renderCustomMarker)}
+              </MapView>
+              {friendsWithCoords.length < filteredFriends.length && (
+                <View style={styles.mapNotice}>
+                  <Text style={styles.mapNoticeText}>
+                    Showing {friendsWithCoords.length} of {filteredFriends.length} friends with locations
+                  </Text>
+                </View>
               )}
-              {searchResults.map(renderSearchResult)}
-            </ScrollView>
-          </View>
+            </>
+          )}
         </View>
-      </Modal>
+      )}
     </View>
   );
 }
@@ -289,11 +307,29 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    padding: 40,
   },
   loadingText: {
     marginTop: 12,
     fontSize: 16,
     color: '#666',
+  },
+  errorText: {
+    fontSize: 18,
+    color: '#ff3b30',
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  retryButton: {
+    backgroundColor: '#007AFF',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+  },
+  retryButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
   },
   header: {
     flexDirection: 'row',
@@ -307,24 +343,54 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#000',
   },
-  addFriendButton: {
-    backgroundColor: '#007AFF',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+  refreshButton: {
+    fontSize: 28,
+    color: '#007AFF',
+    fontWeight: '300',
+  },
+  searchContainer: {
+    paddingHorizontal: 20,
+    paddingBottom: 12,
+  },
+  searchInput: {
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 12,
+    padding: 12,
+    fontSize: 16,
+    backgroundColor: '#f9f9f9',
+  },
+  toggleContainer: {
+    flexDirection: 'row',
+    marginHorizontal: 20,
+    marginBottom: 16,
+    backgroundColor: '#f0f0f0',
+    borderRadius: 12,
+    padding: 4,
+  },
+  toggleButton: {
+    flex: 1,
+    paddingVertical: 10,
+    alignItems: 'center',
     borderRadius: 8,
   },
-  addFriendButtonText: {
-    color: '#fff',
-    fontSize: 14,
+  toggleButtonActive: {
+    backgroundColor: '#007AFF',
+  },
+  toggleButtonText: {
+    fontSize: 16,
     fontWeight: '600',
+    color: '#666',
+  },
+  toggleButtonTextActive: {
+    color: '#fff',
   },
   listContent: {
     padding: 20,
     paddingTop: 8,
   },
-  friendItem: {
+  friendCard: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
     backgroundColor: '#f9f9f9',
     padding: 16,
@@ -333,9 +399,22 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#eee',
   },
+  friendAvatar: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#007AFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  friendAvatarText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
   friendInfo: {
     flex: 1,
-    marginRight: 12,
   },
   friendName: {
     fontSize: 18,
@@ -343,39 +422,64 @@ const styles = StyleSheet.create({
     color: '#000',
     marginBottom: 4,
   },
-  friendEmail: {
+  friendCity: {
     fontSize: 14,
     color: '#666',
-    marginBottom: 4,
+    marginTop: 2,
   },
-  friendLocation: {
-    fontSize: 13,
-    color: '#888',
-    marginTop: 4,
-  },
-  friendCompany: {
+  friendHomeCity: {
     fontSize: 13,
     color: '#888',
     marginTop: 2,
   },
-  removeButton: {
-    backgroundColor: '#ff3b30',
+  map: {
+    flex: 1,
+  },
+  mapNotice: {
+    position: 'absolute',
+    bottom: 20,
+    left: 20,
+    right: 20,
+    backgroundColor: 'rgba(0, 122, 255, 0.9)',
     paddingHorizontal: 16,
-    paddingVertical: 8,
+    paddingVertical: 12,
     borderRadius: 8,
-    minWidth: 80,
     alignItems: 'center',
   },
-  removeButtonText: {
+  mapNoticeText: {
     color: '#fff',
     fontSize: 14,
     fontWeight: '600',
+  },
+  customMarker: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#007AFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 3,
+    borderColor: '#fff',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+  markerText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
   emptyContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     padding: 40,
+    marginTop: 60,
   },
   emptyText: {
     fontSize: 20,
@@ -387,101 +491,5 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#999',
     textAlign: 'center',
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'flex-end',
-  },
-  modalContent: {
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 20,
-    maxHeight: '80%',
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  modalTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#000',
-  },
-  modalCloseButton: {
-    fontSize: 24,
-    color: '#666',
-    fontWeight: '300',
-  },
-  searchInput: {
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    padding: 12,
-    fontSize: 16,
-    backgroundColor: '#f9f9f9',
-    marginBottom: 16,
-  },
-  searchingContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 16,
-  },
-  searchingText: {
-    marginLeft: 8,
-    color: '#666',
-  },
-  searchResultsContainer: {
-    maxHeight: 400,
-  },
-  searchResultItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
-  },
-  searchResultInfo: {
-    flex: 1,
-    marginRight: 12,
-  },
-  searchResultName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#000',
-    marginBottom: 4,
-  },
-  searchResultEmail: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 4,
-  },
-  searchResultLocation: {
-    fontSize: 13,
-    color: '#888',
-  },
-  addButton: {
-    backgroundColor: '#007AFF',
-    paddingHorizontal: 20,
-    paddingVertical: 8,
-    borderRadius: 8,
-    minWidth: 70,
-    alignItems: 'center',
-  },
-  addButtonText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  noResultsText: {
-    textAlign: 'center',
-    color: '#999',
-    padding: 20,
-    fontSize: 16,
   },
 });
