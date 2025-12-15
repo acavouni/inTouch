@@ -36,6 +36,8 @@ model Friendship {
   id         String   @id @default(uuid())
   userId     String
   friendId   String
+  status     String   @default("PENDING")  // PENDING or ACCEPTED
+  createdAt  DateTime @default(now())
 
   user       User     @relation("UserFriends", fields: [userId], references: [id])
   friend     User     @relation("FriendOf", fields: [friendId], references: [id])

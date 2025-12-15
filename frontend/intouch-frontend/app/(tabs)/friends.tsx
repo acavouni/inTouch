@@ -14,6 +14,7 @@ import { useAuth } from '@clerk/clerk-expo';
 import { apiService, User } from '@/services/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import MapView, { Marker } from 'react-native-maps';
+import FriendRequestsModal from '@/components/FriendRequestsModal';
 
 const USER_ID_KEY = 'user_id';
 
@@ -36,9 +37,12 @@ export default function FriendsScreen() {
   const [friends, setFriends] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [requestsModalVisible, setRequestsModalVisible] = useState(false);
+  const [requestCount, setRequestCount] = useState(0);
 
   useEffect(() => {
     loadFriends();
+    loadRequestCount();
   }, []);
 
   const loadFriends = async () => {
@@ -65,6 +69,27 @@ export default function FriendsScreen() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const loadRequestCount = async () => {
+    try {
+      const userId = await AsyncStorage.getItem(USER_ID_KEY);
+      
+      if (!userId) return;
+
+      apiService.setAuth(getToken);
+      const requests = await apiService.getFriendRequests(userId);
+      setRequestCount(requests.length);
+    } catch (err: any) {
+      console.error('Error loading friend requests count:', err);
+      // Fail silently for the badge count
+    }
+  };
+
+  const handleRequestHandled = () => {
+    // Refresh friends list and request count when a request is accepted/rejected
+    loadFriends();
+    loadRequestCount();
   };
 
   // Filter friends based on search query
@@ -195,9 +220,25 @@ export default function FriendsScreen() {
       {/* Header */}
       <View style={[styles.header, { paddingTop: insets.top + 20 }]}>
         <Text style={styles.title}>Friends</Text>
-        <TouchableOpacity onPress={loadFriends} disabled={loading}>
-          <Text style={styles.refreshButton}>↻</Text>
-        </TouchableOpacity>
+        <View style={styles.headerActions}>
+          <TouchableOpacity 
+            style={styles.requestsButton}
+            onPress={() => setRequestsModalVisible(true)}
+          >
+            <Text style={styles.requestsButtonText}>👥</Text>
+            {requestCount > 0 && (
+              <View style={styles.badge}>
+                <Text style={styles.badgeText}>{requestCount}</Text>
+              </View>
+            )}
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => {
+            loadFriends();
+            loadRequestCount();
+          }} disabled={loading}>
+            <Text style={styles.refreshButton}>↻</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Search Bar */}
@@ -294,6 +335,16 @@ export default function FriendsScreen() {
           )}
         </View>
       )}
+
+      {/* Friend Requests Modal */}
+      <FriendRequestsModal
+        visible={requestsModalVisible}
+        onClose={() => {
+          setRequestsModalVisible(false);
+          loadRequestCount(); // Refresh count when modal closes
+        }}
+        onRequestHandled={handleRequestHandled}
+      />
     </View>
   );
 }
@@ -342,6 +393,36 @@ const styles = StyleSheet.create({
     fontSize: 32,
     fontWeight: 'bold',
     color: '#000',
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  requestsButton: {
+    position: 'relative',
+    padding: 4,
+  },
+  requestsButtonText: {
+    fontSize: 28,
+    color: '#007AFF',
+  },
+  badge: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    backgroundColor: '#FF3B30',
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 5,
+  },
+  badgeText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: 'bold',
   },
   refreshButton: {
     fontSize: 28,

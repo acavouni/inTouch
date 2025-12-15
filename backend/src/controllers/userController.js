@@ -55,8 +55,12 @@ async function getUserFriends(req, res) {
   try {
     const { id } = req.params;
 
+    // Only return ACCEPTED friendships
     const friendships = await prisma.friendship.findMany({
-      where: { userId: id },
+      where: { 
+        userId: id,
+        status: 'ACCEPTED',
+      },
       include: { friend: true },
     });
 
@@ -76,7 +80,7 @@ async function getUserFriends(req, res) {
 async function updateUser(req, res) {
   try {
     const { id } = req.params;
-    const { name, email, company, homeCity, currentCity } = req.body;
+    const { name, email, company, homeCity, currentCity, latitude, longitude } = req.body;
 
     const updatedUser = await prisma.user.update({
       where: { id },
@@ -86,6 +90,8 @@ async function updateUser(req, res) {
         ...(company !== undefined && { company }),
         ...(homeCity !== undefined && { homeCity }),
         ...(currentCity !== undefined && { currentCity }),
+        ...(latitude !== undefined && { latitude }),
+        ...(longitude !== undefined && { longitude }),
         lastUpdated: new Date(),
       },
     });

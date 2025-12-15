@@ -103,7 +103,7 @@ class ApiService {
   }
 
   // Friend endpoints
-  async addFriend(userId: string, friendId: string): Promise<{ id: string; userId: string; friendId: string }> {
+  async addFriend(userId: string, friendId: string): Promise<{ id: string; userId: string; friendId: string; status: string }> {
     return this.request('/friends', {
       method: 'POST',
       body: JSON.stringify({ userId, friendId }),
@@ -114,6 +114,23 @@ class ApiService {
     return this.request('/friends', {
       method: 'DELETE',
       body: JSON.stringify({ userId, friendId }),
+    });
+  }
+
+  // Friend request endpoints
+  async getFriendRequests(userId: string): Promise<User[]> {
+    return this.request<User[]>(`/friends/requests/${userId}`);
+  }
+
+  async acceptFriendRequest(friendshipId: string): Promise<{ message: string }> {
+    return this.request(`/friends/${friendshipId}/accept`, {
+      method: 'PUT',
+    });
+  }
+
+  async rejectFriendRequest(friendshipId: string): Promise<{ message: string }> {
+    return this.request(`/friends/${friendshipId}/reject`, {
+      method: 'DELETE',
     });
   }
 }
