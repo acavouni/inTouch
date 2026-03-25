@@ -55,20 +55,30 @@ async function getUserFriends(req, res) {
   try {
     const { id } = req.params;
 
-    // Only return ACCEPTED friendships
-    const friendships = await prisma.friendship.findMany({
-      where: { 
-        userId: id,
-        status: 'ACCEPTED',
-      },
+    // Rows where the current user sent the request
+    const sent = await prisma.friendship.findMany({
+      where: { userId: id, status: 'ACCEPTED' },
       include: { friend: true },
     });
 
-    // Return friends with friendship ID for deletion
-    const friends = friendships.map((entry) => ({
-      ...entry.friend,
-      friendshipId: entry.id,
-    }));
+    // Rows where the current user received the request
+    const received = await prisma.friendship.findMany({
+      where: { friendId: id, status: 'ACCEPTED' },
+      include: { user: true },
+    });
+
+    const merged = [
+      ...sent.map((e) => ({ ...e.friend, friendshipId: e.id })),
+      ...received.map((e) => ({ ...e.user, friendshipId: e.id })),
+    ];
+
+    // Deduplicate by friend's user ID in case both directions exist in the DB
+    const seen = new Set();
+    const friends = merged.filter((f) => {
+      if (seen.has(f.id)) return false;
+      seen.add(f.id);
+      return true;
+    });
 
     res.json(friends);
   } catch (error) {

@@ -53,6 +53,7 @@ export default function SignInScreen() {
     }
   };
 
+//need to fix the Oauth implementation here - definitely not working as expected.
   const handleOAuthSignIn = async (strategy: 'oauth_google' | 'oauth_apple') => {
     if (!isLoaded) return;
 
